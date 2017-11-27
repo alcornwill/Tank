@@ -1,7 +1,5 @@
 
 #include <SDL.h>
-#include <gl\glew.h>
-#include <SDL_opengl.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -16,9 +14,12 @@
 #define FPS 30
 #define TICKS_PER_SECOND ((float)1000 / (float)FPS)
 
+#define SW_OVER_TWO (SCREEN_WIDTH / 2)
+#define SH_OVER_TWO (SCREEN_HEIGHT / 2)
+#define SCREEN_SPACE_X(x) (x * SCREEN_WIDTH + SW_OVER_TWO)
+#define SCREEN_SPACE_Y(y) (y * SCREEN_HEIGHT + SH_OVER_TWO)
 
-int init();
-int initGL();
+void init();
 void initTank();
 void update(float dt);
 void render();
@@ -27,13 +28,7 @@ void printProgramLog( GLuint program );
 void printShaderLog( GLuint shader );
 
 SDL_Window* gWindow = NULL;
-SDL_GLContext gContext;
-
-GLuint gProgramID = 0;
-GLint gVertexPos3DLocation = -1;
-GLint gMVPMatrixLocation = -1;
-GLuint gVBO = 0;
-GLuint gIBO = 0;
+SDL_Renderer* gRenderer = NULL;
 
 unsigned char *keys;
 int quit = 0;
@@ -48,142 +43,17 @@ vec3_t gTankPosition;
 float gTankRotZ;
 mat4_t gTankModelMat;
 
-int init()
+void init()
 {
 	//Initialize SDL
-	if( SDL_Init( SDL_INIT_VIDEO ) < 0 )
-	{
-		printf( "SDL could not initialize! SDL Error: %s\n", SDL_GetError() );
-		return 0;
-	}
+	SDL_Init( SDL_INIT_VIDEO );
 	
-    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
-    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 1 );
-    SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
-
     //Create window
-    gWindow = SDL_CreateWindow( "Tank Demo", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN );
-    if( gWindow == NULL )
-    {
-        printf( "Window could not be created! SDL Error: %s\n", SDL_GetError() );
-        return 0;
-    }
+    gWindow = SDL_CreateWindow( "Tank Demo", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN );
 
-    //Create context
-    gContext = SDL_GL_CreateContext( gWindow );
-    if( gContext == NULL )
-    {
-        printf( "OpenGL context could not be created! SDL Error: %s\n", SDL_GetError() );
-        return 0;
-    }
-    
-    // Initialize GLEW
-    glewExperimental = GL_TRUE; 
-    GLenum glewError = glewInit();
-    if( glewError != GLEW_OK )
-    {
-        printf( "Error initializing GLEW! %s\n", glewGetErrorString( glewError ) );
-    }
-
-    //Initialize OpenGL
-    if( !initGL() )
-    {
-        printf( "Unable to initialize OpenGL!\n" );
-        return 0;
-    }
-
-	return 1;
-}
-
-int initGL()
-{
-	gProgramID = glCreateProgram();
-    
-    // vertex shader
-	GLuint vertexShader = glCreateShader( GL_VERTEX_SHADER );
-	const GLchar* vertexShaderSource[] =
-	{
-		"#version 140\nin vec3 LVertexPos3D;\nuniform mat4 mvp;\n void main() { vec4 pos = vec4(LVertexPos3D, 1);\n pos = mvp * pos;\n gl_Position = pos; }"
-	};
-	glShaderSource( vertexShader, 1, vertexShaderSource, NULL );
-	glCompileShader( vertexShader );
-
-	// check for errors
-	GLint vShaderCompiled = GL_FALSE;
-	glGetShaderiv( vertexShader, GL_COMPILE_STATUS, &vShaderCompiled );
-	if( vShaderCompiled != GL_TRUE )
-	{
-		printf( "Unable to compile vertex shader %d!\n", vertexShader );
-		printShaderLog( vertexShader );
-        return 0;
-	}
-    
-    glAttachShader( gProgramID, vertexShader );
-
-    // fragment shader
-    GLuint fragmentShader = glCreateShader( GL_FRAGMENT_SHADER );
-    const GLchar* fragmentShaderSource[] =
-    {
-        "#version 140\nout vec4 LFragment; void main() { LFragment = vec4( 1.0, 1.0, 1.0, 1.0 ); }"
-    };
-    glShaderSource( fragmentShader, 1, fragmentShaderSource, NULL );
-    glCompileShader( fragmentShader );
-
-    // check for errors
-    GLint fShaderCompiled = GL_FALSE;
-    glGetShaderiv( fragmentShader, GL_COMPILE_STATUS, &fShaderCompiled );
-    if( fShaderCompiled != GL_TRUE )
-    {
-        printf( "Unable to compile fragment shader %d!\n", fragmentShader );
-        printShaderLog( fragmentShader );
-        return 0;
-    }
-    
-    glAttachShader( gProgramID, fragmentShader );
-
-    //Link program
-    glLinkProgram( gProgramID );
-
-    //Check for errors
-    GLint programSuccess = GL_TRUE;
-    glGetProgramiv( gProgramID, GL_LINK_STATUS, &programSuccess );
-    if( programSuccess != GL_TRUE )
-    {
-        printf( "Error linking program %d!\n", gProgramID );
-        printProgramLog( gProgramID );
-        return 0;
-    }
-        
-    //Get vertex attribute location
-    gVertexPos3DLocation = glGetAttribLocation( gProgramID, "LVertexPos3D" );
-    if( gVertexPos3DLocation == -1 )
-    {
-        printf( "LVertexPos3D is not a valid glsl program variable!\n" );
-        return 0;
-    }
-    
-    //Get model matrix location
-    gMVPMatrixLocation = glGetUniformLocation( gProgramID, "mvp" );
-    if( gMVPMatrixLocation == -1 )
-    {
-        printf( "mvp is not a valid glsl program variable!\n" );
-        return 0;
-    }
-            
-    //Initialize clear color
-    glClearColor( 0.f, 0.f, 0.f, 1.f );
-
-    //Create VBO
-    glGenBuffers( 1, &gVBO );
-    glBindBuffer( GL_ARRAY_BUFFER, gVBO );
-    glBufferData( GL_ARRAY_BUFFER, VERTICES * sizeof(GLfloat), vertexData, GL_STATIC_DRAW );
-
-    //Create IBO
-    glGenBuffers( 1, &gIBO );
-    glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gIBO );
-    glBufferData( GL_ELEMENT_ARRAY_BUFFER, EDGES * sizeof(GLuint), edgeData, GL_STATIC_DRAW );
-	
-	return 1;
+    gRenderer = SDL_CreateRenderer( gWindow, -1, SDL_RENDERER_ACCELERATED );
+    //Initialize renderer color
+	SDL_SetRenderDrawColor( gRenderer, 0xFF, 0xFF, 0xFF, 0xFF );
 }
 
 void initTank()
@@ -240,7 +110,7 @@ void update(float dt)
     // ...
     
     // view matrix
-    mat4_t view = m4_translation(vec3(0, -1, -5));
+    mat4_t view = m4_translation(vec3(0, -1, 5));
     view = m4_mul(view, m4_rotation_x(-M_PI / 2));
     
     // model matrix   
@@ -253,84 +123,59 @@ void update(float dt)
 
 void render()
 {
-	glClear( GL_COLOR_BUFFER_BIT );
+    SDL_SetRenderDrawColor( gRenderer, 0x00, 0x00, 0x00, 0xFF );
+    SDL_RenderClear( gRenderer );
     
-    glUseProgram( gProgramID );
-    glEnableVertexAttribArray( gVertexPos3DLocation );
-    
-    glUniformMatrix4fv(gMVPMatrixLocation, 1, GL_FALSE, &gTankModelMat);
-    
-    glBindBuffer( GL_ARRAY_BUFFER, gVBO );
-    glVertexAttribPointer( gVertexPos3DLocation, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), NULL );
-    
-    glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gIBO );
-    glDrawElements( GL_LINES, EDGES, GL_UNSIGNED_INT, NULL );
+    SDL_SetRenderDrawColor( gRenderer, 0xFF, 0xFF, 0xFF, 0xFF );
 
-    glDisableVertexAttribArray( gVertexPos3DLocation );
-
-    glUseProgram( 0 );
+    for (int e = 0; e < EDGES / 2; ++e)
+    {
+        int edge = e * 2;
+        int v1 = edgeData[edge];
+        int v2 = edgeData[edge+1];
+        
+        float x1, y1, z1;
+        int vert1 = v1 * 3;
+        x1 = vertexData[vert1];
+        y1 = vertexData[vert1+1];
+        z1 = vertexData[vert1+2];
+        vec3_t vec1 = vec3(x1, y1, z1);
+        vec1 = m4_mul_pos(gTankModelMat, vec1);
+        
+        float x2, y2, z2;
+        int vert2 = v2 * 3;
+        x2 = vertexData[vert2];
+        y2 = vertexData[vert2+1];
+        z2 = vertexData[vert2+2];
+        vec3_t vec2 = vec3(x2, y2, z2);
+        vec2 = m4_mul_pos(gTankModelMat, vec2);
+        
+        // convert points to screen space and draw
+        float p1x = SCREEN_SPACE_X(vec1.x);
+        float p1y = SCREEN_SPACE_Y(vec1.y);
+        float p2x = SCREEN_SPACE_X(vec2.x);
+        float p2y = SCREEN_SPACE_Y(vec2.y);
+        
+        // draw
+        SDL_RenderDrawLine(gRenderer, p1x, p1y, p2x, p2y);
+    }
+    
+    SDL_RenderPresent( gRenderer );
 }
 
 void close()
 {
-	glDeleteProgram( gProgramID );
-    
+    SDL_DestroyRenderer( gRenderer );
 	SDL_DestroyWindow( gWindow );
 	gWindow = NULL;
+    gRenderer = NULL;
 
 	SDL_Quit();
 }
 
-void printProgramLog( GLuint program )
-{
-	if( glIsProgram( program ) )
-	{
-		int infoLogLength = 0;
-		int maxLength = infoLogLength;
-		
-		glGetProgramiv( program, GL_INFO_LOG_LENGTH, &maxLength );
-		
-		char* infoLog = malloc(sizeof(char) * maxLength);
-		
-		glGetProgramInfoLog( program, maxLength, &infoLogLength, infoLog );
-		if( infoLogLength > 0 )
-			printf( "%s\n", infoLog );
-		
-		free(infoLog);
-	}
-	else
-		printf( "Name %d is not a program\n", program );
-}
-
-void printShaderLog( GLuint shader )
-{
-	if( glIsShader( shader ) )
-	{
-		int infoLogLength = 0;
-		int maxLength = infoLogLength;
-		
-		glGetShaderiv( shader, GL_INFO_LOG_LENGTH, &maxLength );
-		
-		char* infoLog = malloc(sizeof(char) * maxLength);
-		
-		glGetShaderInfoLog( shader, maxLength, &infoLogLength, infoLog );
-		if( infoLogLength > 0 )
-			printf( "%s\n", infoLog );
-
-		free(infoLog);
-	}
-	else
-		printf( "Name %d is not a shader\n", shader );
-}
-
 int main(int argc, char *argv[])
 {    
-	if( !init() )
-    {
-		printf( "Failed to initialize!\n" );
-        close();
-        return 0;
-    }
+	init();
     
     initTank();
     keys = SDL_GetKeyboardState(NULL);
@@ -356,8 +201,6 @@ int main(int argc, char *argv[])
         
         update(dt / 1000.0f);
         render();
-        
-        SDL_GL_SwapWindow( gWindow );
         
         // sleep
         int end = SDL_GetTicks();

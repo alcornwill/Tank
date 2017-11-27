@@ -1,9 +1,10 @@
 
 
+frustum culling!
+
 do some epic 8-bit SFX
 
 SDL stuff
-    (can you even use SDL API with OpenGL?...)
     (use vectors and SDL_RenderDrawLine? or sprites)
     scrolling background
     GUI

@@ -9,8 +9,13 @@
 #include "math_3d.h"
 #include "tank.h"
 
-const int SCREEN_WIDTH = 640;
-const int SCREEN_HEIGHT = 480;
+#define SCREEN_WIDTH 640
+#define SCREEN_HEIGHT 480
+#define ASPECT_RATIO ((float)SCREEN_WIDTH / (float)SCREEN_HEIGHT)
+#define FOV 60
+#define FPS 30
+#define TICKS_PER_SECOND ((float)1000 / (float)FPS)
+
 
 int init();
 int initGL();
@@ -26,7 +31,7 @@ SDL_GLContext gContext;
 
 GLuint gProgramID = 0;
 GLint gVertexPos3DLocation = -1;
-GLint gModelMatrixLocation = -1;
+GLint gMVPMatrixLocation = -1;
 GLuint gVBO = 0;
 GLuint gIBO = 0;
 
@@ -40,7 +45,7 @@ float gPlayerInputY = 0;
 float gPlayerInputRot = 0;
 
 vec3_t gTankPosition;
-vec3_t gTankRotation;
+float gTankRotZ;
 mat4_t gTankModelMat;
 
 int init()
@@ -57,7 +62,7 @@ int init()
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
 
     //Create window
-    gWindow = SDL_CreateWindow( "SDL Tutorial", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN );
+    gWindow = SDL_CreateWindow( "Tank Demo", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN );
     if( gWindow == NULL )
     {
         printf( "Window could not be created! SDL Error: %s\n", SDL_GetError() );
@@ -98,7 +103,7 @@ int initGL()
 	GLuint vertexShader = glCreateShader( GL_VERTEX_SHADER );
 	const GLchar* vertexShaderSource[] =
 	{
-		"#version 140\nin vec3 LVertexPos3D;\nuniform mat4 modelMatrix;\n void main() { vec4 pos = vec4(LVertexPos3D, 1);\n pos = modelMatrix * pos;\n gl_Position = pos; }"
+		"#version 140\nin vec3 LVertexPos3D;\nuniform mat4 mvp;\n void main() { vec4 pos = vec4(LVertexPos3D, 1);\n pos = mvp * pos;\n gl_Position = pos; }"
 	};
 	glShaderSource( vertexShader, 1, vertexShaderSource, NULL );
 	glCompileShader( vertexShader );
@@ -158,10 +163,10 @@ int initGL()
     }
     
     //Get model matrix location
-    gModelMatrixLocation = glGetUniformLocation( gProgramID, "modelMatrix" );
-    if( gModelMatrixLocation == -1 )
+    gMVPMatrixLocation = glGetUniformLocation( gProgramID, "mvp" );
+    if( gMVPMatrixLocation == -1 )
     {
-        printf( "modelMatrix is not a valid glsl program variable!\n" );
+        printf( "mvp is not a valid glsl program variable!\n" );
         return 0;
     }
             
@@ -184,7 +189,7 @@ int initGL()
 void initTank()
 {
     gTankPosition = vec3(0,0,0);
-    gTankRotation = vec3(0,0,0);
+    gTankRotZ = 0;
 }
 
 void update(float dt)
@@ -212,33 +217,38 @@ void update(float dt)
     
     // move tank with player input
     // rotation
-    gTankRotation.z += gPlayerInputRot * gTankRotSpeed * dt;
-    gTankRotation.z = fmod(gTankRotation.z, 2.0f * M_PI);
-    // printf("%f", gPlayerInputRot);
+    gTankRotZ += gPlayerInputRot * gTankRotSpeed * dt;
+    gTankRotZ = fmod(gTankRotZ, 2.0f * M_PI);
     
     // get forward vector
     vec3_t velocity = vec3(0.0f, gPlayerInputY * gTankSpeed * dt, 0.0f);
-    mat4_t rotation = m4_rotation_z(gTankRotation.z);
+    mat4_t rotation = m4_rotation_z(gTankRotZ);
     velocity = m4_mul_dir(rotation, velocity);
     
     // apply velocity
     gTankPosition = v3_add(gTankPosition, velocity);
     
     
-    // update model matrix
-	mat4_t mat = m4_identity();
-    mat4_t translate = m4_translation(gTankPosition);
-    mat4_t rotx = m4_rotation_x(gTankRotation.x);
-    mat4_t roty = m4_rotation_y(gTankRotation.y);
-    mat4_t rotz = m4_rotation_z(gTankRotation.z);
-    // fuck scale
+    // update matrices
+    // projection matrix
+    mat4_t proj = m4_perspective(FOV, ASPECT_RATIO, 0.1f, 100.0f);
     
-    mat = m4_mul(mat, translate);
-    mat = m4_mul(mat, rotx);
-    mat = m4_mul(mat, roty);
-    mat = m4_mul(mat, rotz);
+    // so the coordinate system is:
+    // -Y is up
+    // -Z is forward
+    // X is right
+    // ...
     
-    gTankModelMat = mat;
+    // view matrix
+    mat4_t view = m4_translation(vec3(0, -1, -5));
+    view = m4_mul(view, m4_rotation_x(-M_PI / 2));
+    
+    // model matrix   
+    mat4_t model = m4_translation(gTankPosition);
+    model = m4_mul(model, m4_rotation_z(gTankRotZ));
+    
+    mat4_t mv = m4_mul(proj, view);
+    gTankModelMat = m4_mul(mv, model);
 }
 
 void render()
@@ -248,7 +258,7 @@ void render()
     glUseProgram( gProgramID );
     glEnableVertexAttribArray( gVertexPos3DLocation );
     
-    glUniformMatrix4fv(gModelMatrixLocation, 1, GL_FALSE, &gTankModelMat);
+    glUniformMatrix4fv(gMVPMatrixLocation, 1, GL_FALSE, &gTankModelMat);
     
     glBindBuffer( GL_ARRAY_BUFFER, gVBO );
     glVertexAttribPointer( gVertexPos3DLocation, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), NULL );
@@ -332,8 +342,11 @@ int main(int argc, char *argv[])
     while( !quit )
     {
         int ticks = SDL_GetTicks();
-        dt = (ticks - frameTicks) / 1000.0f;
+        dt = ticks - frameTicks;
         frameTicks = ticks;
+        
+        // print fps
+        // printf("%i\n", (int)(1000 / dt));
         
         while(SDL_PollEvent(&e) != 0)
         {
@@ -341,13 +354,16 @@ int main(int argc, char *argv[])
                 quit = 1;
         }
         
-        update(dt);
+        update(dt / 1000.0f);
         render();
         
         SDL_GL_SwapWindow( gWindow );
         
         // sleep
-        SDL_Delay( 16 ); // todo this properly
+        int end = SDL_GetTicks();
+        float delay = TICKS_PER_SECOND - (end - ticks);
+        if (delay > 0)
+            SDL_Delay( delay );
     }
 
 	close();

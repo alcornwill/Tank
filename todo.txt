@@ -1,8 +1,5 @@
 
 
-camera, frustrum, projection, ...
-cap FPS at 2 or something
-
 do some epic 8-bit SFX
 
 SDL stuff

@@ -5,19 +5,6 @@ from bpy.props import (
 )
 from bpy_extras.io_utils import ExportHelper, orientation_helper_factory, path_reference_mode
 
-# todo HMM any way to render as EDGES?
-
-# glLineWidth(2.5);
-# glColor3f(1.0, 0.0, 0.0);
-# glBegin(GL_LINES);
-# glVertex3f(0.0, 0.0, 0.0);
-# glVertex3f(15, 0, 0);
-# glEnd();
-
-# hmm yeah, so just have to export every edge
-# how to iterate over edges?
-# ALSO this would look horrible
-
 def write_C_array(out, _type, name, items):
     
     out.write('{} {}[] = {{\n    '.format(_type, name))

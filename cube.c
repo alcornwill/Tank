@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define MAX(x, y) (((x) > (y)) ? (x) : (y))
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+#define CLAMP(a, b, c) (MAX(b, MIN(a, c)))
+
 #define MATH_3D_IMPLEMENTATION
 #include "math_3d.h"
 #include "tank.h"
@@ -28,9 +32,20 @@ void render();
 void close();
 void printProgramLog( GLuint program );
 void printShaderLog( GLuint shader );
+void my_audio_callback(void *userdata, unsigned char *stream, int len);
 
 SDL_Window* gWindow = NULL;
 SDL_GLContext gContext;
+
+SDL_AudioSpec want, have;
+SDL_AudioDeviceID dev;
+
+SDL_AudioSpec wav_spec;
+unsigned long wav_length;
+unsigned char *wav_buffer; 
+
+unsigned char *audio_pos; // global pointer to the audio buffer to be played
+unsigned long audio_len; // remaining length of the sample we have to play
 
 GLuint gProgramID = 0;
 GLint gVertexPos3DLocation = -1;
@@ -64,26 +79,75 @@ mat4_t gTankModelMat;
 mat4_t gLandscapeMVPMat;
 mat4_t gLandscapeModelMat;
 
+float pitchShift = 0;
+float volume = 1.0f;
+
+#define PITCH_TABLE_ROWS 16
+#define PITCH_TABLE_COLS 32
+
+unsigned long pitchTable[] = {
+     0x0,
+     0x80000000,
+     0x80008000,
+     0x80808000,
+     0x80808080,
+     0x88808080,
+     0x88888080,
+     0x88888880,
+     0x88888888,
+     0xa8888888,
+     0xaa888888,
+     0xaaa88888,
+     0xaaaa8888,
+     0xaaaaa888,
+     0xaaaaaa88,
+     0xaaaaaaa8
+};
+    
+
+void my_audio_callback(void *userdata, unsigned char *stream, int len) {
+    SDL_memset(stream, 0, len);
+    int count = 0;
+    
+    int i = 0;
+    while (i < len)
+    {
+        ++count;
+        count = count % PITCH_TABLE_COLS;
+        int f = PITCH_TABLE_ROWS * pitchShift;
+        int bitmask = pitchTable[f];
+        int skip = bitmask & (1 << count);
+        if (!skip) {
+            // is copying one itty bitty byte of data at a time bad practice?
+            SDL_MixAudio(stream+i, audio_pos, 2, SDL_MIX_MAXVOLUME * volume);
+            i += 2;
+        }      
+        
+        audio_pos += 2;
+        audio_len -= 2; 
+        
+        if (audio_len == 0) 
+        {
+            audio_len = wav_length;
+            audio_pos = wav_buffer;
+        }
+    }
+}
 
 int init()
 {
 	//Initialize SDL
-	if( SDL_Init( SDL_INIT_VIDEO ) < 0 )
+	if( SDL_Init( SDL_INIT_VIDEO | SDL_INIT_AUDIO ) < 0 )
 	{
 		printf( "SDL could not initialize! SDL Error: %s\n", SDL_GetError() );
 		return 0;
 	}
+    
+    SDL_AudioInit("directsound");
 	
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 3 );
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
-    
-    // SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 3);
-    // SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 3);
-    // SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 2);
-    // SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
-    // SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
-
     
     //Create window
     gWindow = SDL_CreateWindow( "Tank Demo", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN );
@@ -204,7 +268,6 @@ int initGL()
     //Create VBO
     glGenBuffers( 1, &gVBO );
     glBindBuffer( GL_ARRAY_BUFFER, gVBO );
-    //glBufferData( GL_ARRAY_BUFFER, TANK_VERTEX_DATA_SIZE, tankVertexData, GL_STATIC_DRAW );
     glBufferData( GL_ARRAY_BUFFER, TANK_VERTEX_DATA_SIZE + LANDSCAPE_VERTEX_DATA_SIZE, NULL, GL_STATIC_DRAW );
     glBufferSubData( GL_ARRAY_BUFFER, 0, TANK_VERTEX_DATA_SIZE, tankVertexData);
     glBufferSubData( GL_ARRAY_BUFFER, TANK_VERTEX_DATA_SIZE, LANDSCAPE_VERTEX_DATA_SIZE, landscapeVertexData);
@@ -216,7 +279,6 @@ int initGL()
     //Create IBO
     glGenBuffers( 1, &gIBO );
     glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gIBO );
-    //glBufferData( GL_ELEMENT_ARRAY_BUFFER, TANK_EDGE_DATA_SIZE, tankEdgeData, GL_STATIC_DRAW );
     glBufferData( GL_ELEMENT_ARRAY_BUFFER, TANK_EDGE_DATA_SIZE + LANDSCAPE_EDGE_DATA_SIZE, NULL, GL_STATIC_DRAW );
     glBufferSubData( GL_ELEMENT_ARRAY_BUFFER, 0, TANK_EDGE_DATA_SIZE, tankEdgeData);
     glBufferSubData( GL_ELEMENT_ARRAY_BUFFER, TANK_EDGE_DATA_SIZE, LANDSCAPE_EDGE_DATA_SIZE, landscapeEdgeData);
@@ -228,6 +290,25 @@ int initGL()
 
 void initTank()
 {
+    // load audio
+    if (SDL_LoadWAV("truck_idle.wav", &wav_spec, &wav_buffer, &wav_length) == NULL) {
+        printf("Could not open truck_idle.wav: %s\n", SDL_GetError());
+    }
+
+    wav_spec.callback = my_audio_callback;
+    wav_spec.userdata = NULL;
+    
+    audio_pos = wav_buffer;
+    audio_len = wav_length;
+    
+    if ( SDL_OpenAudio(&wav_spec, NULL) < 0 ){
+	  printf("Couldn't open audio: %s\n", SDL_GetError());
+	  exit(-1);
+    }
+    
+    SDL_PauseAudio(0);
+    
+    
     // perspective projection and view matrix
     proj = m4_perspective(FOV, ASPECT_RATIO, NEAR, FAR);
     
@@ -298,6 +379,21 @@ void update(float dt)
     
     // landscape matrix
     gLandscapeMVPMat = m4_mul(pv_ortho, gLandscapeModelMat);
+    
+
+    // audio stuff
+    // tank pitch
+    if (gPlayerInputY) {
+        pitchShift += 0.04f;
+        pitchShift = MIN(pitchShift, 0.99f);
+    } else {
+        pitchShift -= 0.06f;
+        pitchShift = MAX(pitchShift, 0.0f);
+    }
+    
+    // tank volume
+    float k = CLAMP(gTankPosition.y, 0, 20);
+    volume = 1.0f - k / 20.0f;
 }
 
 void render()
@@ -322,11 +418,15 @@ void render()
 
 void close()
 {
+    SDL_FreeWAV(wav_buffer);
+    wav_buffer = NULL;
+    
 	glDeleteProgram( gProgramID );
     
 	SDL_DestroyWindow( gWindow );
 	gWindow = NULL;
 
+    SDL_AudioQuit();
 	SDL_Quit();
 }
 

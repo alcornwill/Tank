@@ -8,10 +8,13 @@
 #define MATH_3D_IMPLEMENTATION
 #include "math_3d.h"
 #include "tank.h"
+#include "landscape.h"
 
 #define SCREEN_WIDTH 640
 #define SCREEN_HEIGHT 480
 #define ASPECT_RATIO ((float)SCREEN_WIDTH / (float)SCREEN_HEIGHT)
+#define NEAR 0.1f
+#define FAR 100.0f
 #define FOV 60
 #define FPS 30
 #define TICKS_PER_SECOND ((float)1000 / (float)FPS)
@@ -34,9 +37,18 @@ GLint gVertexPos3DLocation = -1;
 GLint gMVPMatrixLocation = -1;
 GLuint gVBO = 0;
 GLuint gIBO = 0;
+GLuint gVAO = 0;
 
 unsigned char *keys;
 int quit = 0;
+
+mat4_t proj;
+mat4_t view;
+mat4_t pv;
+
+mat4_t proj_ortho;
+mat4_t view_ortho;
+mat4_t pv_ortho;
 
 float gTankRotSpeed = 2 * M_PI; // one revolution per second
 float gTankSpeed = 5.0f; // 5 units per second
@@ -46,7 +58,12 @@ float gPlayerInputRot = 0;
 
 vec3_t gTankPosition;
 float gTankRotZ;
+mat4_t gTankMVPMat;
 mat4_t gTankModelMat;
+
+mat4_t gLandscapeMVPMat;
+mat4_t gLandscapeModelMat;
+
 
 int init()
 {
@@ -58,9 +75,16 @@ int init()
 	}
 	
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
-    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 1 );
+    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 3 );
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
+    
+    // SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 3);
+    // SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 3);
+    // SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 2);
+    // SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
+    // SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
 
+    
     //Create window
     gWindow = SDL_CreateWindow( "Tank Demo", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN );
     if( gWindow == NULL )
@@ -173,23 +197,62 @@ int initGL()
     //Initialize clear color
     glClearColor( 0.f, 0.f, 0.f, 1.f );
 
+    // VAO
+    glGenVertexArrays(1, &gVAO);
+    glBindVertexArray(gVAO);
+    
     //Create VBO
     glGenBuffers( 1, &gVBO );
     glBindBuffer( GL_ARRAY_BUFFER, gVBO );
-    glBufferData( GL_ARRAY_BUFFER, VERTICES * sizeof(GLfloat), vertexData, GL_STATIC_DRAW );
-
+    //glBufferData( GL_ARRAY_BUFFER, TANK_VERTEX_DATA_SIZE, tankVertexData, GL_STATIC_DRAW );
+    glBufferData( GL_ARRAY_BUFFER, TANK_VERTEX_DATA_SIZE + LANDSCAPE_VERTEX_DATA_SIZE, NULL, GL_STATIC_DRAW );
+    glBufferSubData( GL_ARRAY_BUFFER, 0, TANK_VERTEX_DATA_SIZE, tankVertexData);
+    glBufferSubData( GL_ARRAY_BUFFER, TANK_VERTEX_DATA_SIZE, LANDSCAPE_VERTEX_DATA_SIZE, landscapeVertexData);
+    
+    // shader input
+    glEnableVertexAttribArray( gVertexPos3DLocation );
+    glVertexAttribPointer( gVertexPos3DLocation, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), NULL );
+    
     //Create IBO
     glGenBuffers( 1, &gIBO );
     glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gIBO );
-    glBufferData( GL_ELEMENT_ARRAY_BUFFER, EDGES * sizeof(GLuint), edgeData, GL_STATIC_DRAW );
-	
+    //glBufferData( GL_ELEMENT_ARRAY_BUFFER, TANK_EDGE_DATA_SIZE, tankEdgeData, GL_STATIC_DRAW );
+    glBufferData( GL_ELEMENT_ARRAY_BUFFER, TANK_EDGE_DATA_SIZE + LANDSCAPE_EDGE_DATA_SIZE, NULL, GL_STATIC_DRAW );
+    glBufferSubData( GL_ELEMENT_ARRAY_BUFFER, 0, TANK_EDGE_DATA_SIZE, tankEdgeData);
+    glBufferSubData( GL_ELEMENT_ARRAY_BUFFER, TANK_EDGE_DATA_SIZE, LANDSCAPE_EDGE_DATA_SIZE, landscapeEdgeData);
+
+    glBindVertexArray(0);
+    
 	return 1;
 }
 
 void initTank()
 {
+    // perspective projection and view matrix
+    proj = m4_perspective(FOV, ASPECT_RATIO, NEAR, FAR);
+    
+    view = m4_translation(vec3(0, -1, -5));
+    view = m4_mul(view, m4_rotation_x(-M_PI / 2));
+    
+    pv = m4_mul(proj, view);
+    
+    // orthographic projection and view matrix
+    float ortho_scale = 0.5f;
+    // everything is all inverted...
+    proj_ortho = m4_ortho(ortho_scale, -ortho_scale, -ortho_scale, ortho_scale, FAR, NEAR);
+    
+    view_ortho = m4_translation(vec3(0, 0, 5));
+    view_ortho = m4_mul(view_ortho, m4_rotation_x(-M_PI / 2));
+    
+    pv_ortho = m4_mul(proj_ortho, view_ortho);
+    
+    
+    // object positions
     gTankPosition = vec3(0,0,0);
     gTankRotZ = 0;
+    gTankModelMat = m4_identity();
+    
+    gLandscapeModelMat = m4_identity();
 }
 
 void update(float dt)
@@ -228,27 +291,13 @@ void update(float dt)
     // apply velocity
     gTankPosition = v3_add(gTankPosition, velocity);
     
+    // tank matrix
+    gTankModelMat = m4_translation(gTankPosition);
+    gTankModelMat = m4_mul(gTankModelMat, m4_rotation_z(gTankRotZ));
+    gTankMVPMat = m4_mul(pv, gTankModelMat);
     
-    // update matrices
-    // projection matrix
-    mat4_t proj = m4_perspective(FOV, ASPECT_RATIO, 0.1f, 100.0f);
-    
-    // so the coordinate system is:
-    // -Y is up
-    // -Z is forward
-    // X is right
-    // ...
-    
-    // view matrix
-    mat4_t view = m4_translation(vec3(0, -1, -5));
-    view = m4_mul(view, m4_rotation_x(-M_PI / 2));
-    
-    // model matrix   
-    mat4_t model = m4_translation(gTankPosition);
-    model = m4_mul(model, m4_rotation_z(gTankRotZ));
-    
-    mat4_t mv = m4_mul(proj, view);
-    gTankModelMat = m4_mul(mv, model);
+    // landscape matrix
+    gLandscapeMVPMat = m4_mul(pv_ortho, gLandscapeModelMat);
 }
 
 void render()
@@ -256,19 +305,19 @@ void render()
 	glClear( GL_COLOR_BUFFER_BIT );
     
     glUseProgram( gProgramID );
-    glEnableVertexAttribArray( gVertexPos3DLocation );
+    glBindVertexArray(gVAO);
     
-    glUniformMatrix4fv(gMVPMatrixLocation, 1, GL_FALSE, &gTankModelMat);
+    // tank
+    glUniformMatrix4fv(gMVPMatrixLocation, 1, GL_FALSE, &gTankMVPMat);
+    glDrawElementsBaseVertex( GL_LINES, TANK_NUM_EDGE, GL_UNSIGNED_INT, NULL, 0 );
     
-    glBindBuffer( GL_ARRAY_BUFFER, gVBO );
-    glVertexAttribPointer( gVertexPos3DLocation, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), NULL );
+    // landscape
+    glUniformMatrix4fv(gMVPMatrixLocation, 1, GL_FALSE, &gLandscapeMVPMat);
+    glDrawElementsBaseVertex( GL_LINES, LANDSCAPE_NUM_EDGE, GL_UNSIGNED_INT, (void*)TANK_EDGE_DATA_SIZE, TANK_NUM_VERTEX / 3);
     
-    glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gIBO );
-    glDrawElements( GL_LINES, EDGES, GL_UNSIGNED_INT, NULL );
-
-    glDisableVertexAttribArray( gVertexPos3DLocation );
-
     glUseProgram( 0 );
+
+    SDL_GL_SwapWindow( gWindow );
 }
 
 void close()
@@ -356,8 +405,6 @@ int main(int argc, char *argv[])
         
         update(dt / 1000.0f);
         render();
-        
-        SDL_GL_SwapWindow( gWindow );
         
         // sleep
         int end = SDL_GetTicks();

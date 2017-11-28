@@ -1,33 +1,7 @@
 
 #include <SDL_opengl.h>
 
-GLuint indexData[] = {
-     0, 1, 3, 2,
-     2, 3, 7, 6,
-     6, 7, 5, 4,
-     4, 5, 1, 0,
-     2, 6, 4, 0,
-     3, 1, 8, 9,
-     8, 11, 14, 12,
-     1, 5, 11, 8,
-     7, 3, 9, 10,
-     5, 7, 10, 11,
-     13, 15, 17, 16,
-     10, 9, 12, 14,
-     22, 23, 25, 24,
-     20, 21, 19, 18,
-     18, 19, 15, 13,
-     16, 20, 18, 13,
-     21, 17, 15, 19,
-     25, 23, 27, 29,
-     22, 24, 28, 26,
-     10, 14, 11,
-     8, 12, 9
-};
-
-const int INDICES = 82;
-
-GLfloat vertexData[] = {
+GLfloat tankVertexData[] = {
      0.581, 0.780, -0.035,
      0.716, 1.000, 0.291,
      0.581, -0.836, -0.035,
@@ -62,9 +36,10 @@ GLfloat vertexData[] = {
      -0.000, -0.480, 1.008
 };
 
-const int VERTICES = 96;
+#define TANK_NUM_VERTEX 96
+#define TANK_VERTEX_DATA_SIZE (TANK_NUM_VERTEX * sizeof(GLfloat))
 
-GLuint edgeData[] = {
+GLuint tankEdgeData[] = {
      2, 0,
      0, 1,
      1, 3,
@@ -115,5 +90,6 @@ GLuint edgeData[] = {
      31, 30
 };
 
-const int EDGES = 96;
+#define TANK_NUM_EDGE 96
+#define TANK_EDGE_DATA_SIZE (TANK_NUM_EDGE * sizeof(GLuint))
 

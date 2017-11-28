@@ -1,11 +1,13 @@
 
 
 do some epic 8-bit SFX
+    save a sample in a header file
+    loop it
+    use sound streaming
+    modulate the frequency to pitch up/down
 
-SDL stuff
-    (can you even use SDL API with OpenGL?...)
-    (use vectors and SDL_RenderDrawLine? or sprites)
-    scrolling background
-    GUI
-        (opengl render frame should be smaller than window)
+do GUI from F14 tomcat
     
+you could do font if you were nuts
+    https://github.com/osresearch/vst/blob/master/teensyv/asteroids_font.c
+

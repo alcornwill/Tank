@@ -3,11 +3,14 @@ from bpy.props import (
     StringProperty,
     BoolProperty
 )
-from bpy_extras.io_utils import ExportHelper, orientation_helper_factory, path_reference_mode
+from bpy_extras.io_utils import ExportHelper, orientation_helper_factory, path_reference_mode  
 
-def write_C_array(out, _type, name, items):
+def write_C_array(out, _type, objName, keyword, items):
+    arrayName = objName.lower() + keyword + "Data"
+    defineName = (objName + '_NUM_' + keyword).upper()
+    defineSizeName = (objName + '_' + keyword + '_DATA_SIZE').upper()
     
-    out.write('{} {}[] = {{\n    '.format(_type, name))
+    out.write('{} {}[] = {{\n    '.format(_type, arrayName))
     count = 0
     for i in range(len(items)):
         row = items[i]
@@ -29,44 +32,44 @@ def write_C_array(out, _type, name, items):
             else:
                 out.write(',')
     out.write('};\n\n')
-    return count
+    
+    # also write the array length
+    out.write('#define {} {}\n'.format(defineName, count))
+    # also define the array size
+    out.write('#define {} ({} * sizeof({}))\n\n'.format(defineSizeName, defineName, _type))
 
-def custom_export(context, filepath, path_mode, use_edges, use_normals, use_colors, use_uvs):
+def custom_export(context, filepath, path_mode, use_indices, use_edges, use_normals, use_colors, use_uvs):
     out = open(filepath, 'w')
     # get selected object
     obj = context.object 
     data = obj.data
+    name = obj.name
     
     out.write('\n')
     out.write('#include <SDL_opengl.h>\n\n')
     
-    indices = [list(poly.vertices) for poly in data.polygons]
-    count = write_C_array(out, 'GLuint', 'indexData', indices)
-    out.write('const int INDICES = {};\n\n'.format(count))   
-       
     verts = [list(vert.co) for vert in data.vertices]
-    count = write_C_array(out, 'GLfloat', 'vertexData', verts)
-    out.write('const int VERTICES = {};\n\n'.format(count))
+    count = write_C_array(out, 'GLfloat', name, 'Vertex', verts)
+    
+    if use_indices:
+        indices = [list(poly.vertices) for poly in data.polygons]
+        count = write_C_array(out, 'GLuint', name, 'Index', indices)
     
     if use_edges:
         edges = [list(edge.vertices) for edge in data.edges]
-        count = write_C_array(out, 'GLuint', 'edgeData', edges)
-        out.write('const int EDGES = {};\n\n'.format(count))    
+        count = write_C_array(out, 'GLuint', name, 'Edge', edges)
     
     if use_normals:
         normals = [list(vert.normal) for vert in data.vertices]
-        count = write_C_array(out, 'GLfloat', 'normalData', normals)
-        out.write('const int NORMALS = {};\n\n'.format(count))
-        
+        count = write_C_array(out, 'GLfloat', name, 'Normal', normals)
+
     if use_colors:
         colors = [list(color.color) for color in data.vertex_colors[0].data]
-        count = write_C_array(out, 'GLfloat', 'colorData', colors)
-        out.write('const int COLORS = {};\n\n'.format(count))
+        count = write_C_array(out, 'GLfloat', name, 'Color', colors)
     
     if use_uvs:    
         uvs = [list(uv.uv) for uv in data.uv_layers[0].data]
-        count = write_C_array(out, 'GLfloat', 'uvData', uvs)
-        out.write('const int UVS = {};\n\n'.format(count))
+        count = write_C_array(out, 'GLfloat', name, 'Uv', uvs)
             
     out.close()
 
@@ -88,6 +91,7 @@ class SimpleOperator(bpy.types.Operator, ExportHelper, IOOBJOrientationHelper):
     path_mode = path_reference_mode
     check_extension = True
     
+    indices = BoolProperty("Indices", default=True)
     edges = BoolProperty("Edges")
     normals = BoolProperty("Normals")
     colors = BoolProperty("Colors")
@@ -98,7 +102,7 @@ class SimpleOperator(bpy.types.Operator, ExportHelper, IOOBJOrientationHelper):
         return context.active_object is not None
 
     def execute(self, context):
-        custom_export(context, self.filepath, self.path_mode, self.edges, self.normals, self.colors, self.uvs)
+        custom_export(context, self.filepath, self.path_mode, self.indices, self.edges, self.normals, self.colors, self.uvs)
         return {'FINISHED'}
     
 def menu_func_export(self, context):
